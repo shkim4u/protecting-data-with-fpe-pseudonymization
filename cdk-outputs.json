@@ -1,0 +1,6 @@
+{
+  "FpePseudonymizationStack": {
+    "FpeMasterKeyArn": "arn:aws:kms:ap-northeast-2:301391518739:key/a0ad5779-8172-454c-af1f-59ae9d6d5991",
+    "ApiUrlOutput": "https://hy2w5sro4j.execute-api.ap-northeast-2.amazonaws.com/"
+  }
+}

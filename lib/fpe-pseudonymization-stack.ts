@@ -1,8 +1,12 @@
 import * as cdk from '@aws-cdk/core';
+import * as iam from '@aws-cdk/aws-iam'
 import * as lambda from '@aws-cdk/aws-lambda'
+import * as apigatewayv2 from '@aws-cdk/aws-apigatewayv2'
+import * as kms from '@aws-cdk/aws-kms'
 import * as path from 'path'
-// import { exec } from 'child_process';
 import { spawnSync, SpawnSyncOptions } from 'child_process';
+import { CorsHttpMethod } from '@aws-cdk/aws-apigatewayv2';
+import { LambdaProxyIntegration } from '@aws-cdk/aws-apigatewayv2-integrations';
 
 function exec(command: string, options?: SpawnSyncOptions) {
 	const proc = spawnSync('bash', ['-c', command], options);
@@ -25,6 +29,17 @@ function exec(command: string, options?: SpawnSyncOptions) {
 export class FpePseudonymizationStack extends cdk.Stack {
   constructor(scope: cdk.Construct, id: string, props?: cdk.StackProps) {
     super(scope, id, props);
+
+		// KMS master key to double-protect FPE encryption key to be stored in Secret Manager as encrypted form.
+		const fpeMasterKey = new kms.Key(
+			this,
+			'fpe-master-key', {
+			removalPolicy: cdk.RemovalPolicy.DESTROY,
+			// pendingWindow: cdk.Duration.days(7),
+			alias: 'alias/fpe-master-key',
+			description: 'KMS master key to double-protect FPE encryption key to be stored in Secret Manager as encrypted form.',
+			enableKeyRotation: true,
+		});
 
 		const asset = path.join(__dirname, "../lambda/fpe");
 		const environment = {
@@ -96,10 +111,94 @@ export class FpePseudonymizationStack extends cdk.Stack {
 					}
 				),
 				// If we name our handler 'bootstrap' we can also use the 'provided' runtime.
-				// handler: 'bootstrap',
-				handler: 'main',
-				runtime: lambda.Runtime.GO_1_X
+				handler: 'bootstrap',
+				// handler: 'main',
+				runtime: lambda.Runtime.GO_1_X,
+				environment: {
+					'FPE_MASTER_KEY_ARN': fpeMasterKey.keyArn,
+					'FPE_DATA_KEY_SECRET_NAME': '/secret/fpe/datakey'
+				}
 			}
 		);
+
+		/**
+		 * Permission to create, read, and delete secret value in Secrets Manager to store FPE encryption key encrypted by KMS.
+		 * References:
+		 * - https://docs.aws.amazon.com/secretsmanager/latest/userguide/auth-and-access_resource-policies.html
+		 * - https://docs.aws.amazon.com/ko_kr/secretsmanager/latest/userguide/reference_iam-permissions.html
+		 */
+		const lambdaFunctionPermissionPolicy = new iam.PolicyStatement(
+			{
+				actions: [
+					'secretsmanager:CreateSecret',
+					'secretsmanager:DeleteSecret',
+					'secretsmanager:GetSecretValue'
+				],
+				resources: ['*'],
+				effect: iam.Effect.ALLOW
+			}
+		);
+		lambdaFunction.grantPrincipal.addToPrincipalPolicy(lambdaFunctionPermissionPolicy);
+
+		// const fpeMasterKeyPolicy = new iam.PolicyStatement(
+		// 	{
+		// 		principals: [lambdaFunction.grantPrincipal],
+		// 		actions: ['kms:*'],
+		// 		resources: [fpeMasterKey.keyArn],
+		// 		effect: iam.Effect.ALLOW
+		// 	}
+		// )
+		// fpeMasterKey.addToResourcePolicy(fpeMasterKeyPolicy);
+
+		fpeMasterKey.grantEncryptDecrypt(lambdaFunction.grantPrincipal);
+
+
+
+		const api = new apigatewayv2.HttpApi(
+			this,
+			'FpeApi',
+			{
+				description: 'Format Preserving Pseudonumization API',
+				createDefaultStage: true,
+				corsPreflight: {
+					allowHeaders: [
+						'Content-Type',
+						'X-Amz-Date',
+						'Authorization',
+						'X-Api-Key',
+					],
+					// allowCredentials: true,
+					allowMethods: [CorsHttpMethod.POST],
+					allowOrigins: ['*']
+				}
+			}
+		);
+
+		api.addRoutes(
+			{
+				path: '/encrypt',
+				integration: new LambdaProxyIntegration(
+					{
+						handler: lambdaFunction
+					}
+				),
+				methods: [apigatewayv2.HttpMethod.POST]
+			}
+		);
+
+		api.addRoutes(
+			{
+				path: '/decrypt',
+				integration: new LambdaProxyIntegration(
+					{
+						handler: lambdaFunction
+					}
+				),
+				methods: [apigatewayv2.HttpMethod.POST]
+			}
+		);
+
+		new cdk.CfnOutput(this, 'FpeMasterKeyArn', {value: fpeMasterKey.keyArn,});
+		new cdk.CfnOutput(this, 'ApiUrlOutput', {value: api.url!});
   }
 }

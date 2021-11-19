@@ -2,54 +2,79 @@ package main
 
 import (
 	"context"
-	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"net/http"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-lambda-go/lambda"
-	"github.com/capitalone/fpe/ff1"
+
+	"github.com/shkim4u/protecting-data-with-fpe-pseudonymization/pkg/handlers"
 )
 
-func handler(ctx context.Context, event events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	// Key and tweak should be byte arrays. Put your key and tweak here.
-	// To make it easier for demo purposes, decode from a hex string here.
-	key, err := hex.DecodeString("EF4359D8D580AA4F7F036D6F04FC6A94")
-	if err != nil {
-		panic(err)
+var (
+	ErrorInvalidBody = "invalid body data in request"
+)
+
+type FpeRequestParams struct {
+	// Operation string `json:"operation"`
+	Input string `json:"input"`
+	Radix int    `json:"radix"`
+}
+
+func init() {
+	handlers.Init()
+}
+
+// func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
+func handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
+	// func handler(params Params) (events.APIGatewayV2HTTPResponse, error) {
+
+	// TODO: Discriminate methods - GET, POST, PUT, DELETE
+
+	fmt.Println("--- Context[Begin] ---")
+	fmt.Println(ctx)
+	fmt.Println("--- Context[End] ---")
+
+	fmt.Println("--- Request[Begin] ---")
+	fmt.Println(req)
+	fmt.Println("--- Request[End] ---")
+
+	var params FpeRequestParams
+	if err := json.Unmarshal([]byte(req.Body), &params); err != nil {
+		return handlers.HandleError(http.StatusBadRequest, errors.New(ErrorInvalidBody))
 	}
-	tweak, err := hex.DecodeString("D8E7920AFA330A73")
-	if err != nil {
-		panic(err)
+
+	fmt.Println("--- Params[Begin] ---")
+	fmt.Println(params)
+	fmt.Println("--- Params[END] ---")
+
+	path := req.RequestContext.HTTP.Path
+	switch path {
+	case "/encrypt":
+		return handlers.Encrypt(params.Input, params.Radix, ctx, req)
+
+	case "/decrypt":
+		return handlers.Decrypt(params.Input, params.Radix, ctx, req)
+
+	default:
+		return handlers.UnhandledOperation()
 	}
 
-	// Create a new FF1 cipher "object"
-	// 10 is the radix/base, and 8 is the tweak length.
-	FF1, err := ff1.NewCipher(10, 8, key, tweak)
-	if err != nil {
-		panic(err)
-	}
+	// [2021-11-17]: Discriminate operations with path instead of parameter in body.
+	/*
+		switch params.Operation {
+		case "Encrypt":
+			return handlers.Encrypt(params.Input, params.Radix, ctx, req)
 
-	original := "123456789"
+		case "Decrypt":
+			return handlers.Decrypt(params.Input, params.Radix, ctx, req)
 
-	// Call the encryption function on an example SSN
-	ciphertext, err := FF1.Encrypt(original)
-	if err != nil {
-		panic(err)
-	}
-
-	plaintext, err := FF1.Decrypt(ciphertext)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println("Original:", original)
-	fmt.Println("Ciphertext:", ciphertext)
-	fmt.Println("Plaintext:", plaintext)
-
-	return events.APIGatewayV2HTTPResponse{
-		StatusCode: 200,
-		Body:       "CDK",
-	}, nil
+		default:
+			return handlers.UnhandledOperation()
+		}
+	*/
 }
 
 func main() {
