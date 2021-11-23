@@ -13,18 +13,10 @@ import (
 	"github.com/shkim4u/protecting-data-with-fpe-pseudonymization/pkg/handlers"
 )
 
-var (
-	ErrorInvalidBody = "invalid body data in request"
-)
-
+// Structure to hold parameter as JSON
 type FpeRequestParams struct {
-	// Operation string `json:"operation"`
 	Input string `json:"input"`
 	Radix int    `json:"radix"`
-}
-
-func init() {
-	handlers.Init()
 }
 
 // func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
@@ -43,7 +35,7 @@ func handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.AP
 
 	var params FpeRequestParams
 	if err := json.Unmarshal([]byte(req.Body), &params); err != nil {
-		return handlers.HandleError(http.StatusBadRequest, errors.New(ErrorInvalidBody))
+		return handlers.HandleError(http.StatusBadRequest, errors.New(handlers.ErrorInvalidBody))
 	}
 
 	fmt.Println("--- Params[Begin] ---")
