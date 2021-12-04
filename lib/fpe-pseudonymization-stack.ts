@@ -49,7 +49,7 @@ export class FpePseudonymizationStack extends cdk.Stack {
 		};
 
 		// Create Lambda function.
-		const lambdaFunction = new lambda.Function(
+		const fpeLambdaFunction = new lambda.Function(
 			this,
 			'FpeLambdaFunction',
 			{
@@ -60,6 +60,7 @@ export class FpePseudonymizationStack extends cdk.Stack {
 							// Try to bundle on the local machine.
 							local: {
 								tryBundle(outputDir: string) {
+									console.log(`Output Directory: ${outputDir}`);
 									// Ensure that all the required dependencies are installed locally.
 									try {
 										exec(
@@ -81,7 +82,6 @@ export class FpePseudonymizationStack extends cdk.Stack {
 										[
 											'go test -v',			// Test first.
 											`go build -mod=vendor -o ${path.join(outputDir, 'bootstrap')}`
-											// `go build -o ${path.join(outputDir, 'bootstrap')}`
 										].join(' && '),
 										{
 											env: { ...process.env, ...environment},
@@ -97,7 +97,7 @@ export class FpePseudonymizationStack extends cdk.Stack {
 									return true;
 								},
 							},
-							image: lambda.Runtime.GO_1_X.bundlingDockerImage,
+							image: lambda.Runtime.GO_1_X.bundlingImage,
 							command: [
 								'bash',
 								'-c',
@@ -116,7 +116,9 @@ export class FpePseudonymizationStack extends cdk.Stack {
 				runtime: lambda.Runtime.GO_1_X,
 				environment: {
 					'FPE_MASTER_KEY_ARN': fpeMasterKey.keyArn,
-					'FPE_DATA_KEY_SECRET_NAME': '/secret/fpe/datakey'
+					'FPE_DEK_SECRET_NAME': '/secret/fpe/dek',
+					// Tweak value for FPE.
+					'FPE_TWEAK': 'D8E7920AFA330A73'
 				}
 			}
 		);
@@ -138,21 +140,10 @@ export class FpePseudonymizationStack extends cdk.Stack {
 				effect: iam.Effect.ALLOW
 			}
 		);
-		lambdaFunction.grantPrincipal.addToPrincipalPolicy(lambdaFunctionPermissionPolicy);
-
-		// const fpeMasterKeyPolicy = new iam.PolicyStatement(
-		// 	{
-		// 		principals: [lambdaFunction.grantPrincipal],
-		// 		actions: ['kms:*'],
-		// 		resources: [fpeMasterKey.keyArn],
-		// 		effect: iam.Effect.ALLOW
-		// 	}
-		// )
-		// fpeMasterKey.addToResourcePolicy(fpeMasterKeyPolicy);
-
-		fpeMasterKey.grantEncryptDecrypt(lambdaFunction.grantPrincipal);
-
-
+		// Attach IAM permission policy to this Lambda function.
+		fpeLambdaFunction.grantPrincipal.addToPrincipalPolicy(lambdaFunctionPermissionPolicy);
+		// Grant encrypt/decrypt to this Lambda.
+		fpeMasterKey.grantEncryptDecrypt(fpeLambdaFunction.grantPrincipal);
 
 		const api = new apigatewayv2.HttpApi(
 			this,
@@ -179,7 +170,7 @@ export class FpePseudonymizationStack extends cdk.Stack {
 				path: '/encrypt',
 				integration: new LambdaProxyIntegration(
 					{
-						handler: lambdaFunction
+						handler: fpeLambdaFunction
 					}
 				),
 				methods: [apigatewayv2.HttpMethod.POST]
@@ -191,7 +182,7 @@ export class FpePseudonymizationStack extends cdk.Stack {
 				path: '/decrypt',
 				integration: new LambdaProxyIntegration(
 					{
-						handler: lambdaFunction
+						handler: fpeLambdaFunction
 					}
 				),
 				methods: [apigatewayv2.HttpMethod.POST]

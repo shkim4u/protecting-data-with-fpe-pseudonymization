@@ -1,7 +1,24 @@
+/*
+Package handlers implements format-preserving encryption/decryption.
+
+References for AWS Secrets Manager:
+- https://github.com/aws/aws-sdk-go/blob/main/service/secretsmanager/examples_test.go
+- https://gist.github.com/xlyk/f2f2246ee259415c05f84eb21218ac73
+- https://docs.aws.amazon.com/sdk-for-go/api/service/secretsmanager/
+- https://aws.amazon.com/blogs/security/how-to-securely-provide-database-credentials-to-lambda-functions-by-using-aws-secrets-manager/
+
+References for AWS KMS:
+- https://github.com/meltwater/secretary/blob/master/kms.go
+- Generate data encryption key for FPE.
+- https://docs.aws.amazon.com/sdk-for-go/api/service/kms/
+- https://globaldatanet.com/tech-blog/using-aws-kms-with-golang
+
+*/
 package handlers
 
 import (
 	"context"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -10,156 +27,42 @@ import (
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go/aws"
-	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/kms"
-	"github.com/aws/aws-sdk-go/service/secretsmanager"
 
 	"github.com/capitalone/fpe/ff1"
 )
-
-var ErrorUnhandledOperation = "unhandled operation"
-
-type ErrorBody struct {
-	ErrorMsg *string `json:"error,omitempty"`
-}
 
 var (
 	kmsClient            = newKmsClient()
 	secretsManagerClient = newSecretsManagerClient()
 
 	// FPE encryption/decryption key bytes as plain in global state.
-	// NOTE) This is only for faster operation, and have to be encrypted form instead if this concerns you.
+	// NOTE: This is only for faster operation, and have to be encrypted form instead if this concerns you.
 	dekBlob []byte
 )
-
-func CreateAndStoreKey() {
-	fmt.Println("FPE data encryption key is not generated and stored in Secrets Manager yet.")
-	fmt.Println("Target secret name in Secrets Manager: ", aws.String(os.Getenv("FPE_DATA_KEY_SECRET_NAME")))
-
-	/**
-	* [2021-11-20]
-	* FPE data encryption key is not stored in Secrets Manager yet.
-	* Generate one and store it in Secrets Manager.
-	 */
-	// KMS service instance.
-	kmsSvc := kms.New(session.New())
-
-	// Generate data encryption key for FPE.
-	// Reference: https://docs.aws.amazon.com/sdk-for-go/api/service/kms/
-	// Reference: https://globaldatanet.com/tech-blog/using-aws-kms-with-golang
-	// Reference (Must Read): https://github.com/meltwater/secretary/blob/master/kms.go
-	kmsKeyArn := os.Getenv("FPE_MASTER_KEY_ARN")
-	keyNumbOfBytes := int64(16)
-	dataKeyResult, _ := kmsSvc.GenerateDataKey(
-		&kms.GenerateDataKeyInput{
-			KeyId:         &kmsKeyArn,
-			NumberOfBytes: &keyNumbOfBytes,
-		},
-	)
-
-	// As HEX string.
-	encryptedDataKeyString := hex.EncodeToString(dataKeyResult.CiphertextBlob)
-	fmt.Println("Key ciphertext blob: ", encryptedDataKeyString)
-
-	smSvc := secretsmanager.New(session.New())
-	// Create secret in Secrets Manager.
-	secretResult, _ := smSvc.CreateSecret(
-		&secretsmanager.CreateSecretInput{
-			Description:  aws.String("FPE encryption key protected by KMS CMK."),
-			Name:         aws.String(os.Getenv("FPE_DATA_KEY_SECRET_NAME")),
-			SecretString: aws.String(encryptedDataKeyString),
-		},
-	)
-	fmt.Println("Secrets Result: ", secretResult)
-
-	// Finally set FPE data encryption key from plain.
-	dekBlob = dataKeyResult.Plaintext
-}
 
 func init() {
 	fmt.Println("{Handlers} Initializing to acquire FPE data encryption key.")
 
-	exist, secretValue := secretsManagerClient.CheckIfSecretValueExist(os.Getenv("FPE_DATA_KEY_SECRET_NAME"))
 	var dekEnvelopeBlob []byte
+	exist, secretValue := secretsManagerClient.CheckIfSecretValueExist(os.Getenv("FPE_DEK_SECRET_NAME"))
 	if exist {
 		// FPE data encryption key sucessfully retrieved from Secrets Manager.
 		// Parse it as byte array.
 		fmt.Println("Encrypted FPE Data Encryption Key: ", *secretValue)
 
-		/**
-		 * [2021-11-20] Decrypt FPE data encryption key.
-		 */
+		// [2021-11-20] Decrypt FPE data encryption key.
 		dekEnvelopeBlob, _ = hex.DecodeString(*secretValue)
-
-		// // KMS Service.
-		// kmsService := kms.New(session)
-
-		// // Decrypt the encrypted FPE data encryption key.
-		// decryptResult, _ := kmsService.Decrypt(&kms.DecryptInput{CiphertextBlob: encryptedDataKeyBytes})
-		// dataKeyBytes = decryptResult.Plaintext
-		// // CAUTION: Remove this debug line when done.
-		// fmt.Println("FPE Data Encryption Key: ", hex.EncodeToString(dataKeyBytes))
-
 	} else {
-		// Secret value for FPE data encryption key does not exist, and then create a new one
-
+		// Secret value for FPE data encryption key does not exist, create a new one
 		dekEnvelopeBlob = kmsClient.GenerateDEK(os.Getenv("FPE_MASTER_KEY_ARN"))
 		secretsManagerClient.CreateSecretWithValue(
-			os.Getenv("FPE_DATA_KEY_SECRET_NAME"),
+			os.Getenv("FPE_DEK_SECRET_NAME"),
 			hex.EncodeToString(dekEnvelopeBlob),
 			"FPE data enryption key protected by KMS CMK.",
 		)
 	}
 
 	dekBlob = kmsClient.DecryptDEK(dekEnvelopeBlob)
-	// CAUTION: Remove this debug line when done.
-	fmt.Println("FPE Data Encryption Key: ", hex.EncodeToString(dekBlob))
-
-	// // Mark here.
-	// session, _ := session.NewSession()
-
-	// // Secrets Manager Service.
-	// smSvc := secretsmanager.New(session)
-
-	// /**
-	//  * [2021-11-19] Read the FPE data encryption key from Secrets Manager.
-	//  * If it's not found, then create a new one generated by KMS.
-	//  */
-
-	// secretValueResult, err := smSvc.GetSecretValue(
-	// 	&secretsmanager.GetSecretValueInput{
-	// 		SecretId: aws.String(os.Getenv("FPE_DATA_KEY_SECRET_NAME")),
-	// 	},
-	// )
-	// if err != nil {
-	// 	if aerr, ok := err.(awserr.Error); ok {
-	// 		switch aerr.Code() {
-	// 		case secretsmanager.ErrCodeResourceNotFoundException:
-	// 			CreateAndStoreKey()
-	// 		default:
-	// 			// TODO: Handle default case for fallback.
-	// 			fmt.Print(aerr.Error())
-	// 		}
-	// 	}
-	// } else {
-	// 	// FPE data encryption key sucessfully retrieved from Secrets Manager.
-	// 	// Parse it as byte array.
-	// 	fmt.Println("Encrypted FPE Data Encryption Key: ", *secretValueResult.SecretString)
-
-	// 	/**
-	// 	 * [2021-11-20] Decrypt FPE data encryption key.
-	// 	 */
-	// 	encryptedDataKeyBytes, _ := hex.DecodeString(*secretValueResult.SecretString)
-
-	// 	// KMS Service.
-	// 	kmsService := kms.New(session)
-
-	// 	// Decrypt the encrypted FPE data encryption key.
-	// 	decryptResult, _ := kmsService.Decrypt(&kms.DecryptInput{CiphertextBlob: encryptedDataKeyBytes})
-	// 	dataKeyBytes = decryptResult.Plaintext
-	// 	// CAUTION: Remove this debug line when done.
-	// 	fmt.Println("FPE Data Encryption Key: ", hex.EncodeToString(dataKeyBytes))
-	// }
 }
 
 func Encrypt(
@@ -171,164 +74,30 @@ func Encrypt(
 	events.APIGatewayV2HTTPResponse,
 	error,
 ) {
-	// // Initialize a session in us-west-2 that the SDK will use to load
-	// // credentials from the shared credentials file ~/.aws/credentials.
-	// sess, err := session.NewSession()
-	// if err != nil {
-	// 	// return apiResponse(http.StatusInternalServerError, errors.New(err.Error()))
-	// 	return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
-	// }
-
-	// // Secrets Manager to store FPE key as encrypted form.
-	// // Reference: https://github.com/aws/aws-sdk-go/blob/main/service/secretsmanager/examples_test.go
-	// // Reference: https://gist.github.com/xlyk/f2f2246ee259415c05f84eb21218ac73
-	// // Reference: https://docs.aws.amazon.com/sdk-for-go/api/service/secretsmanager/
-	// // Reference: https://aws.amazon.com/blogs/security/how-to-securely-provide-database-credentials-to-lambda-functions-by-using-aws-secrets-manager/
-	// secretsManager := secretsmanager.New(sess)
-
-	// /**
-	//  * [2021-11-19] Read the FPE data encryption key from Secrets Manager
-	//  * If it's not found, then create a new one generated by KMS.
-	//  */
-	// getSecretValueInput := &secretsmanager.GetSecretValueInput{
-	// 	// SecretId: aws.String("FpeDataKeySecret"),
-	// 	SecretId: aws.String(os.Getenv("FPE_DATA_KEY_SECRET_NAME")),
-	// }
-	// var fpeEncryptedKeyString string
-	// secretValueResult, err := secretsManager.GetSecretValue(getSecretValueInput)
-	// if err != nil {
-	// 	if aerr, ok := err.(awserr.Error); ok {
-	// 		switch aerr.Code() {
-	// 		case secretsmanager.ErrCodeResourceNotFoundException:
-	// 			fmt.Println(secretsmanager.ErrCodeResourceNotFoundException, aerr.Error())
-
-	// 			// Create KMS service client.
-	// 			kmsService := kms.New(sess)
-
-	// 			// Generate data encryption key for FPE.
-	// 			// Reference: https://docs.aws.amazon.com/sdk-for-go/api/service/kms/
-	// 			// Reference: https://globaldatanet.com/tech-blog/using-aws-kms-with-golang
-	// 			// Reference (Must Read): https://github.com/meltwater/secretary/blob/master/kms.go
-	// 			// result, err := kmsService.GenerateDataKey(&dataKeyInput)
-	// 			fpeMasterKeyArn := os.Getenv("FPE_MASTER_KEY_ARN")
-	// 			fpeMasterKeyNumOfBytes := int64(16)
-	// 			generateDataKeyResult, err := kmsService.GenerateDataKey(
-	// 				&kms.GenerateDataKeyInput{
-	// 					KeyId:         &fpeMasterKeyArn,
-	// 					NumberOfBytes: &fpeMasterKeyNumOfBytes,
-	// 				},
-	// 			)
-	// 			if err != nil {
-	// 				// return apiResponse(http.StatusInternalServerError, errors.New(err.Error()))
-	// 				return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
-	// 			}
-
-	// 			fpeEncryptedDataKeyAsHex := hex.EncodeToString(generateDataKeyResult.CiphertextBlob)
-	// 			fmt.Println("Key CiphertextBlob: ", fpeEncryptedDataKeyAsHex)
-
-	// 			// Seret value not found. Try to create a new one with FPE data key.
-	// 			secretsInput := &secretsmanager.CreateSecretInput{
-	// 				// ClientRequestToken: aws.String("EXAMPLE1-90ab-cdef-fedc-ba987SECRET1"),
-	// 				Description: aws.String("FPE encryption key protected (encrypted) by KMS CMK."),
-	// 				// Name:         aws.String("FpeDataKeySecret"),
-	// 				Name:         aws.String(os.Getenv("FPE_DATA_KEY_SECRET_NAME")),
-	// 				SecretString: aws.String(fpeEncryptedDataKeyAsHex),
-	// 			}
-	// 			createSecretResult, err := secretsManager.CreateSecret(secretsInput)
-	// 			if err != nil {
-	// 				return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
-	// 			}
-	// 			fmt.Println("Secrets Result: ", createSecretResult)
-
-	// 			// Re-read the secret value.
-	// 			// secretValueResult, err := secretsManager.GetSecretValue(getSecretValueInput)
-	// 			// if (err != nil) {
-	// 			// 	return HandleError(http.StatusInternalServerError, errors.New(aerr.Error()))
-	// 			// } else {
-	// 			// 	fpeEncryptedDataKeyAsHex
-	// 			// }
-	// 			fpeEncryptedKeyString = fpeEncryptedDataKeyAsHex
-
-	// 		// case secretsmanager.ErrCodeInvalidParameterException:
-	// 		// 	fmt.Println(secretsmanager.ErrCodeInvalidParameterException, aerr.Error())
-	// 		// case secretsmanager.ErrCodeInvalidRequestException:
-	// 		// 	fmt.Println(secretsmanager.ErrCodeInvalidRequestException, aerr.Error())
-	// 		// case secretsmanager.ErrCodeDecryptionFailure:
-	// 		// 	fmt.Println(secretsmanager.ErrCodeDecryptionFailure, aerr.Error())
-	// 		// case secretsmanager.ErrCodeInternalServiceError:
-	// 		// 	fmt.Println(secretsmanager.ErrCodeInternalServiceError, aerr.Error())
-	// 		default:
-	// 			fmt.Println(aerr.Error())
-	// 			return HandleError(http.StatusInternalServerError, errors.New(aerr.Error()))
-	// 		}
-	// 	} else {
-	// 		// Print the error, cast err to awserr.Error to get the Code and
-	// 		// Message from an error.
-	// 		fmt.Println(err.Error())
-	// 		return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
-	// 	}
-	// 	// return
-	// } else {
-	// 	fpeEncryptedKeyString = *secretValueResult.SecretString
-	// }
-
-	// fmt.Println("fpeEncryptionKeyString: ", fpeEncryptedKeyString)
-
-	// /**
-	//  * [2021-11-20] Decrypt FPE data key.
-	//  */
-	// fpeEncryptedKeyBytes, err := hex.DecodeString(fpeEncryptedKeyString)
-	// if err != nil {
-	// 	return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
-	// }
-
-	// kmsService := kms.New(sess)
-	// // Decrypt the encrypted FPE data key.
-	// decryptResult, err := kmsService.Decrypt(&kms.DecryptInput{CiphertextBlob: fpeEncryptedKeyBytes})
-	// if err != nil {
-	// 	return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
-	// }
-
 	var resp FpeResponse
 
 	// Key and tweak should be byte arrays. Put your key and tweak here.
-	// To make it easier for demo purposes, decode from a hex string here.
-	// key, err := hex.DecodeString("EF4359D8D580AA4F7F036D6F04FC6A94")
-	// if err != nil {
-	// 	// return apiResponse(http.StatusInternalServerError, errors.New(err.Error()))
-	// 	return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
-	// }
-	// key := decryptResult.Plaintext
 	key := dekBlob
-	tweak, err := hex.DecodeString("D8E7920AFA330A73")
+	tweak, err := hex.DecodeString(os.Getenv("FPE_TWEAK"))
 	if err != nil {
-		// return apiResponse(http.StatusInternalServerError, errors.New(err.Error()))
 		return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
 	}
 
 	// Create a new FF1 cipher "object"
-	// 10 is the radix/base, and 8 is the tweak length.
-	FF1, err := ff1.NewCipher(radix, 8, key, tweak)
+	FF1, err := ff1.NewCipher(radix, binary.Size(tweak), key, tweak)
 	if err != nil {
-		// return apiResponse(http.StatusInternalServerError, errors.New(err.Error()))
 		return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
 	}
 
 	plaintext := input
 
-	// Call the encryption function on an example SSN
+	// Call the encryption function on a plaintext
 	ciphertext, err := FF1.Encrypt(plaintext)
 	if err != nil {
-		// panic(err)
-		// return apiResponse(http.StatusInternalServerError, errors.New(err.Error()))
 		return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
 	}
 
-	// plaintext, err := FF1.Decrypt(ciphertext)
-	// if err != nil {
-	// 	panic(err)
-	// }
-
+	// WARNING) For debugging only
 	fmt.Println("Plaintext:", plaintext)
 	fmt.Println("Ciphertext:", ciphertext)
 
@@ -356,24 +125,14 @@ func Decrypt(
 	var resp FpeResponse
 
 	// Key and tweak should be byte arrays. Put your key and tweak here.
-	// To make it easier for demo purposes, decode from a hex string here.
-	// key, err := hex.DecodeString("EF4359D8D580AA4F7F036D6F04FC6A94")
-	// if err != nil {
-	// 	// return apiResponse(http.StatusInternalServerError, errors.New(err.Error()))
-	// 	return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
-	// }
 	key := dekBlob
 	tweak, err := hex.DecodeString("D8E7920AFA330A73")
 	if err != nil {
-		// return apiResponse(http.StatusInternalServerError, errors.New(err.Error()))
 		return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
 	}
 
-	// Create a new FF1 cipher "object"
-	// 10 is the radix/base, and 8 is the tweak length.
 	FF1, err := ff1.NewCipher(radix, 8, key, tweak)
 	if err != nil {
-		// return apiResponse(http.StatusInternalServerError, errors.New(err.Error()))
 		return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
 	}
 
@@ -382,16 +141,10 @@ func Decrypt(
 	// Call the encryption function on an example SSN
 	plaintext, err := FF1.Decrypt(ciphertext)
 	if err != nil {
-		// panic(err)
-		// return apiResponse(http.StatusInternalServerError, errors.New(err.Error()))
 		return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
 	}
 
-	// plaintext, err := FF1.Decrypt(ciphertext)
-	// if err != nil {
-	// 	panic(err)
-	// }
-
+	// WARNING) For debugging only
 	fmt.Println("Ciphertext:", ciphertext)
 	fmt.Println("Plaintext:", plaintext)
 

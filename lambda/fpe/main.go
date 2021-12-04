@@ -19,16 +19,9 @@ type FpeRequestParams struct {
 	Radix int    `json:"radix"`
 }
 
-// func handler(ctx context.Context, req events.APIGatewayProxyRequest) (events.APIGatewayProxyResponse, error) {
 func handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
-	// func handler(params Params) (events.APIGatewayV2HTTPResponse, error) {
-
-	// TODO: Discriminate methods - GET, POST, PUT, DELETE
-
-	fmt.Println("--- Context[Begin] ---")
-	fmt.Println(ctx)
-	fmt.Println("--- Context[End] ---")
-
+	// [2021-11-23] For debug only while developing
+	// Remove when done
 	fmt.Println("--- Request[Begin] ---")
 	fmt.Println(req)
 	fmt.Println("--- Request[End] ---")
@@ -53,20 +46,6 @@ func handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.AP
 	default:
 		return handlers.UnhandledOperation()
 	}
-
-	// [2021-11-17]: Discriminate operations with path instead of parameter in body.
-	/*
-		switch params.Operation {
-		case "Encrypt":
-			return handlers.Encrypt(params.Input, params.Radix, ctx, req)
-
-		case "Decrypt":
-			return handlers.Decrypt(params.Input, params.Radix, ctx, req)
-
-		default:
-			return handlers.UnhandledOperation()
-		}
-	*/
 }
 
 func main() {
