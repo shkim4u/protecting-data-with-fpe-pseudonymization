@@ -3,10 +3,15 @@ import * as iam from '@aws-cdk/aws-iam'
 import * as lambda from '@aws-cdk/aws-lambda'
 import * as apigatewayv2 from '@aws-cdk/aws-apigatewayv2'
 import * as kms from '@aws-cdk/aws-kms'
+import * as cognito from '@aws-cdk/aws-cognito'
 import * as path from 'path'
 import { spawnSync, SpawnSyncOptions } from 'child_process';
 import { CorsHttpMethod } from '@aws-cdk/aws-apigatewayv2';
 import { LambdaProxyIntegration } from '@aws-cdk/aws-apigatewayv2-integrations';
+import * as apiGatewayAuthorizers from '@aws-cdk/aws-apigatewayv2-authorizers';
+import { RemovalPolicy } from '@aws-cdk/core';
+import { setFlagsFromString } from 'v8';
+import { AccountRecovery } from '@aws-cdk/aws-cognito';
 
 function exec(command: string, options?: SpawnSyncOptions) {
 	const proc = spawnSync('bash', ['-c', command], options);
@@ -145,6 +150,57 @@ export class FpePseudonymizationStack extends cdk.Stack {
 		// Grant encrypt/decrypt to this Lambda.
 		fpeMasterKey.grantEncryptDecrypt(fpeLambdaFunction.grantPrincipal);
 
+		/**
+		 * [2021-12-07]
+		 * Create the user pool and other resources to control access to the API Gateway.
+		 */
+		// User pool.
+		const userPool = new cognito.UserPool(
+			this,
+			`fpe-userpool`, {
+				userPoolName: `fpe-userpool`,
+				removalPolicy: cdk.RemovalPolicy.DESTROY,
+				selfSignUpEnabled: true,
+				signInAliases: {email: true},
+				autoVerify: {email: true},
+				passwordPolicy: {
+					minLength: 8,
+					requireLowercase: true,
+					requireDigits: true,
+					requireUppercase: true,
+					requireSymbols: true,
+				},
+				accountRecovery: cognito.AccountRecovery.EMAIL_ONLY
+			}
+		);
+
+		// User pool client.
+		const userPoolClient = new cognito.UserPoolClient(
+			this,
+			`fpe-userpool-client`,
+			{
+				userPool,
+				authFlows: {
+					adminUserPassword: true,
+					userPassword: true,
+					custom: true,
+					userSrp: true,
+				},
+				supportedIdentityProviders: [
+					cognito.UserPoolClientIdentityProvider.COGNITO,
+				],
+			}
+		);
+
+		// Create the authorizer.
+		const authorizer = new apiGatewayAuthorizers.HttpUserPoolAuthorizer(
+			{
+				userPool,
+				userPoolClients: [userPoolClient],
+				identitySource: ['$request.header.Authorization'],
+			}
+		);
+
 		const api = new apigatewayv2.HttpApi(
 			this,
 			'FpeApi',
@@ -173,7 +229,8 @@ export class FpePseudonymizationStack extends cdk.Stack {
 						handler: fpeLambdaFunction
 					}
 				),
-				methods: [apigatewayv2.HttpMethod.POST]
+				methods: [apigatewayv2.HttpMethod.POST],
+				authorizer: authorizer										// Authorizer.
 			}
 		);
 
@@ -185,11 +242,14 @@ export class FpePseudonymizationStack extends cdk.Stack {
 						handler: fpeLambdaFunction
 					}
 				),
-				methods: [apigatewayv2.HttpMethod.POST]
+				methods: [apigatewayv2.HttpMethod.POST],
+				authorizer: authorizer										// Authorizer.
 			}
 		);
 
 		new cdk.CfnOutput(this, 'FpeMasterKeyArn', {value: fpeMasterKey.keyArn,});
 		new cdk.CfnOutput(this, 'ApiUrlOutput', {value: api.url!});
+		new cdk.CfnOutput(this, 'UserPoolId', { value: userPool.userPoolId });
+		new cdk.CfnOutput(this, 'UserPoolClientId', { value: userPoolClient.userPoolClientId });
   }
 }

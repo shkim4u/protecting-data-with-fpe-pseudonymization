@@ -1,6 +1,8 @@
 {
   "FpePseudonymizationStack": {
-    "FpeMasterKeyArn": "arn:aws:kms:ap-northeast-2:301391518739:key/a0ad5779-8172-454c-af1f-59ae9d6d5991",
-    "ApiUrlOutput": "https://hy2w5sro4j.execute-api.ap-northeast-2.amazonaws.com/"
+    "UserPoolClientId": "6s60k6m40uj6oqs7b34h657hgr",
+    "UserPoolId": "ap-northeast-2_nqSOkMaXU",
+    "FpeMasterKeyArn": "arn:aws:kms:ap-northeast-2:301391518739:key/39c82ea5-d7dc-4e96-b641-7bc476100cec",
+    "ApiUrlOutput": "https://hygyq1vfb8.execute-api.ap-northeast-2.amazonaws.com/"
   }
 }
