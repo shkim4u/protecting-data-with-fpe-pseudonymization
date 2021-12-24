@@ -17,19 +17,30 @@ References for AWS KMS:
 package handlers
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/binary"
+	"encoding/gob"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
+	"unsafe"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go/aws"
-
 	"github.com/capitalone/fpe/ff1"
+	"golang.org/x/crypto/nacl/secretbox"
 )
+
+type KmsPayload struct {
+	EncryptedDataKey []byte
+	Nonce            *[24]byte
+	Message          []byte
+}
 
 var (
 	kmsClient            = newKmsClient()
@@ -37,13 +48,14 @@ var (
 
 	// FPE encryption/decryption key bytes as plain in global state.
 	// NOTE: This is only for faster operation, and have to be encrypted form instead if this concerns you.
-	dekBlob []byte
+	dekBlob         []byte
+	dekEnvelopeBlob []byte
 )
 
 func init() {
 	fmt.Println("{Handlers} Initializing to acquire FPE data encryption key.")
 
-	var dekEnvelopeBlob []byte
+	// var dekEnvelopeBlob []byte
 	exist, secretValue := secretsManagerClient.CheckIfSecretValueExist(os.Getenv("FPE_DEK_SECRET_NAME"))
 	if exist {
 		// FPE data encryption key sucessfully retrieved from Secrets Manager.
@@ -153,6 +165,113 @@ func Decrypt(
 	resp.Plaintext = plaintext
 	resp.Ciphertext = ciphertext
 	resp.Radix = radix
+
+	return apiResponse(
+		http.StatusOK,
+		&resp,
+	)
+}
+
+func EnvelopeEncrypt(
+	input string,
+	ctx context.Context, // Reserved.
+	req events.APIGatewayV2HTTPRequest, // Reserved.
+) (
+	events.APIGatewayV2HTTPResponse,
+	error,
+) {
+	var resp FpeResponse
+
+	// Initialize payload.
+	payload := &KmsPayload{
+		EncryptedDataKey: dekEnvelopeBlob,
+		Nonce:            &[24]byte{},
+	}
+
+	// Generate nonce.
+	_, err := io.ReadFull(rand.Reader, payload.Nonce[:])
+	if err != nil {
+		return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
+	}
+
+	plaintext := input
+	plainbytes := []byte(plaintext)
+	// Encrypt message.
+	payload.Message = secretbox.Seal(
+		payload.Message,
+		plainbytes,
+		payload.Nonce,
+		(*[32]byte)(unsafe.Pointer(&dekBlob)),
+	)
+
+	buffer := &bytes.Buffer{}
+	if err := gob.NewEncoder(buffer).Encode(payload); err != nil {
+		return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
+	}
+
+	ciphertext := encode(buffer.Bytes())
+
+	// WARNING) For debugging only
+	fmt.Println("Plaintext:", plaintext)
+	fmt.Println("Ciphertext:", ciphertext)
+
+	// Set response.
+	resp.Operation = "Envelope-Encrypt"
+	resp.Plaintext = plaintext
+	resp.Ciphertext = ciphertext
+	resp.Radix = -1 // Unused
+
+	return apiResponse(
+		http.StatusOK,
+		&resp,
+	)
+}
+
+func EnvelopeDecrypt(
+	input string,
+	ctx context.Context, // Reserved.
+	req events.APIGatewayV2HTTPRequest, // Reserved.
+) (
+	events.APIGatewayV2HTTPResponse,
+	error,
+) {
+	var resp FpeResponse
+
+	// Extract payload.
+	// encrypted, err := decode(input[8 : len(input)-1])
+	encrypted, err := decode(input)
+	if err != nil {
+		return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
+	}
+
+	// Decode payload structure.
+	var payload KmsPayload
+	gob.NewDecoder(bytes.NewReader(encrypted)).Decode(&payload)
+
+	// Decrypt message.
+	var plainbytes []byte
+	plainbytes, ok := secretbox.Open(
+		plainbytes,
+		payload.Message,
+		payload.Nonce,
+		(*[32]byte)(unsafe.Pointer(&dekBlob)),
+	)
+	if !ok {
+		return HandleError(http.StatusInternalServerError, errors.New("failed to open secretbox"))
+	}
+
+	ciphertext := input
+	plaintext := string(plainbytes)
+
+	// WARNING) For debugging only
+	fmt.Println("Plaintext:", plaintext)
+	fmt.Println("Ciphertext:", ciphertext)
+
+	// Set response.
+	resp.Operation = "Envelope-Decrypt"
+	resp.Plaintext = plaintext
+	resp.Ciphertext = ciphertext
+	resp.Radix = -1 // Unused
 
 	return apiResponse(
 		http.StatusOK,

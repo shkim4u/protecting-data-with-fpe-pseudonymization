@@ -6,7 +6,7 @@ import * as kms from '@aws-cdk/aws-kms'
 import * as cognito from '@aws-cdk/aws-cognito'
 import * as path from 'path'
 import { spawnSync, SpawnSyncOptions } from 'child_process';
-import { CorsHttpMethod } from '@aws-cdk/aws-apigatewayv2';
+import { CfnIntegrationResponse, CorsHttpMethod } from '@aws-cdk/aws-apigatewayv2';
 import { LambdaProxyIntegration } from '@aws-cdk/aws-apigatewayv2-integrations';
 import * as apiGatewayAuthorizers from '@aws-cdk/aws-apigatewayv2-authorizers';
 import { RemovalPolicy } from '@aws-cdk/core';
@@ -244,6 +244,32 @@ export class FpePseudonymizationStack extends cdk.Stack {
 				),
 				methods: [apigatewayv2.HttpMethod.POST],
 				authorizer: authorizer										// Authorizer.
+			}
+		);
+
+		api.addRoutes(
+			{
+				path: '/envelope-encrypt',
+				integration: new LambdaProxyIntegration(
+					{
+						handler: fpeLambdaFunction
+					}
+				),
+				methods: [apigatewayv2.HttpMethod.POST],
+				authorizer: authorizer
+			}
+		);
+
+		api.addRoutes(
+			{
+				path: '/envelope-decrypt',
+				integration: new LambdaProxyIntegration(
+					{
+						handler: fpeLambdaFunction
+					}
+				),
+				methods: [apigatewayv2.HttpMethod.POST],
+				authorizer: authorizer
 			}
 		);
 

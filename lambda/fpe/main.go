@@ -43,6 +43,12 @@ func handler(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.AP
 	case "/decrypt":
 		return handlers.Decrypt(params.Input, params.Radix, ctx, req)
 
+	case "/envelope-encrypt":
+		return handlers.EnvelopeEncrypt(params.Input, ctx, req)
+
+	case "/envelope-decrypt":
+		return handlers.EnvelopeDecrypt(params.Input, ctx, req)
+
 	default:
 		return handlers.UnhandledOperation()
 	}
