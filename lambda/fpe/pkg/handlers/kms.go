@@ -86,7 +86,7 @@ func (k *KmsClientImpl) GenerateDEK(keyId string) []byte {
 
 	err := k.CallWithRetry(func(impl *kms.KMS) error {
 		var ferr error
-		keyNumberOfBytes := int64(16)
+		keyNumberOfBytes := int64(32)
 		response, ferr = impl.GenerateDataKey(
 			&kms.GenerateDataKeyInput{
 				KeyId:         &keyId,

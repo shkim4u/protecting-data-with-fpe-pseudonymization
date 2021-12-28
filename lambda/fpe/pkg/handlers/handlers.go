@@ -28,7 +28,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"unsafe"
 
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go/aws"
@@ -182,6 +181,9 @@ func EnvelopeEncrypt(
 ) {
 	var resp FpeResponse
 
+	// fmt.Println("[EnvelopeEncrypt] dekEnvelopeBlob: ", hex.EncodeToString(dekEnvelopeBlob))
+	// fmt.Println("[EnvelopeEncrypt] dekBlob: ", hex.EncodeToString(dekBlob))
+
 	// Initialize payload.
 	payload := &KmsPayload{
 		EncryptedDataKey: dekEnvelopeBlob,
@@ -191,17 +193,22 @@ func EnvelopeEncrypt(
 	// Generate nonce.
 	_, err := io.ReadFull(rand.Reader, payload.Nonce[:])
 	if err != nil {
-		return HandleError(http.StatusInternalServerError, errors.New(err.Error()))
+		return HandleError(http.StatusInternalServerError, errors.New("failed to generate random nonce: "+err.Error()))
 	}
 
 	plaintext := input
 	plainbytes := []byte(plaintext)
+
+	var dataKey [32]byte
+	copy(dataKey[:], dekBlob)
+
 	// Encrypt message.
 	payload.Message = secretbox.Seal(
 		payload.Message,
 		plainbytes,
 		payload.Nonce,
-		(*[32]byte)(unsafe.Pointer(&dekBlob)),
+		// (*[32]byte)(unsafe.Pointer(&dekBlob)),
+		&dataKey,
 	)
 
 	buffer := &bytes.Buffer{}
@@ -237,6 +244,9 @@ func EnvelopeDecrypt(
 ) {
 	var resp FpeResponse
 
+	// fmt.Println("[EnvelopeDecrypt] dekEnvelopeBlob: ", hex.EncodeToString(dekEnvelopeBlob))
+	// fmt.Println("[EnvelopeDecrypt] dekBlob: ", hex.EncodeToString(dekBlob))
+
 	// Extract payload.
 	// encrypted, err := decode(input[8 : len(input)-1])
 	encrypted, err := decode(input)
@@ -248,13 +258,21 @@ func EnvelopeDecrypt(
 	var payload KmsPayload
 	gob.NewDecoder(bytes.NewReader(encrypted)).Decode(&payload)
 
+	// // [2021-12-28] Decrypt key.
+	// dataKey := kmsClient.DecryptDEK(payload.EncryptedDataKey)
+	// fmt.Println("[EnvelopeDecrypt] decrypted data key: ", hex.EncodeToString(dataKey))
+
+	var dataKey [32]byte
+	copy(dataKey[:], dekBlob)
+
 	// Decrypt message.
 	var plainbytes []byte
 	plainbytes, ok := secretbox.Open(
 		plainbytes,
 		payload.Message,
 		payload.Nonce,
-		(*[32]byte)(unsafe.Pointer(&dekBlob)),
+		// (*[32]byte)(unsafe.Pointer(&dekBlob)),
+		&dataKey,
 	)
 	if !ok {
 		return HandleError(http.StatusInternalServerError, errors.New("failed to open secretbox"))

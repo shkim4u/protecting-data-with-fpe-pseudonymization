@@ -121,7 +121,7 @@ export class FpePseudonymizationStack extends cdk.Stack {
 				runtime: lambda.Runtime.GO_1_X,
 				environment: {
 					'FPE_MASTER_KEY_ARN': fpeMasterKey.keyArn,
-					'FPE_DEK_SECRET_NAME': '/secret/fpe/dek',
+					'FPE_DEK_SECRET_NAME': '/secret/fpe/dek2',
 					// Tweak value for FPE.
 					'FPE_TWEAK': 'D8E7920AFA330A73'
 				}
