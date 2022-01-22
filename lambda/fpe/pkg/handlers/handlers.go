@@ -33,6 +33,7 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/shkim4u/protecting-data-with-fpe-pseudonymization/pkg/ff1"
 	"github.com/shkim4u/protecting-data-with-fpe-pseudonymization/pkg/kms"
+	"github.com/shkim4u/protecting-data-with-fpe-pseudonymization/pkg/secretsmanager"
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
@@ -44,7 +45,7 @@ type KmsPayload struct {
 
 var (
 	kmsClient            = NewKmsClient()
-	secretsManagerClient = newSecretsManagerClient()
+	secretsManagerClient = NewSecretsManagerClient()
 
 	// FPE encryption/decryption key bytes as plain in global state.
 	// NOTE: This is only for faster operation, and have to be encrypted form instead if this concerns you.
