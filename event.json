@@ -1,4 +1,16 @@
 {
-	"input": "1234567890123456",
-	"radix": 10
+	"requestContext": {
+		"stage": "$default",
+		"http": {
+			"path": "/encrypt"
+		},
+		"resourcePath": "/{proxy+}",
+		"httpMethod": "POST",
+		"apiId": "1234567890",
+		"protocol": "HTTP/1.1"
+	},
+	"path": "/encrypt",
+	"httpMethod": "POST",
+	"isBase64Encoded": true,
+	"body": "{\n    \"input\": \"1234567890123456\",\n    \"radix\": 10\n  }"
 }

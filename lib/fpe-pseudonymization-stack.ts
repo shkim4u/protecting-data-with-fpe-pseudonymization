@@ -2,6 +2,7 @@ import * as cdk from '@aws-cdk/core';
 import * as iam from '@aws-cdk/aws-iam'
 import * as lambda from '@aws-cdk/aws-lambda'
 import * as apigatewayv2 from '@aws-cdk/aws-apigatewayv2'
+import * as logs from '@aws-cdk/aws-logs'
 import * as kms from '@aws-cdk/aws-kms'
 import * as cognito from '@aws-cdk/aws-cognito'
 import * as path from 'path'
@@ -220,6 +221,34 @@ export class FpePseudonymizationStack extends cdk.Stack {
 				}
 			}
 		);
+
+		/**
+		 * [2021-12-28] KSH: Reserved for log setting.
+		 */
+		// const stage = api.defaultStage!.node.defaultChild as apigatewayv2.CfnStage;
+		// const logGroup = new logs.LogGroup(
+		// 	api,
+		// 	'AccessLogs',
+		// 	{
+		// 		retention: 90, // Keep logs for 90 days
+		// 	}
+		// );
+
+		// stage.accessLogSettings = {
+		// 	destinationArn: logGroup.logGroupArn,
+		// 	format: JSON.stringify({
+		// 		requestId: '$context.requestId',
+		// 		userAgent: '$context.identity.userAgent',
+		// 		sourceIp: '$context.identity.sourceIp',
+		// 		requestTime: '$context.requestTime',
+		// 		httpMethod: '$context.httpMethod',
+		// 		path: '$context.path',
+		// 		status: '$context.status',
+		// 		responseLength: '$context.responseLength',
+		// 	}),
+		// };
+
+		// logGroup.grantWrite(new iam.ServicePrincipal('apigateway.amazonaws.com'));
 
 		api.addRoutes(
 			{
