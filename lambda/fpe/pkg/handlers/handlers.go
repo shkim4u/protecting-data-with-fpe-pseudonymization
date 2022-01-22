@@ -32,6 +32,7 @@ import (
 	"github.com/aws/aws-lambda-go/events"
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/shkim4u/protecting-data-with-fpe-pseudonymization/pkg/ff1"
+	"github.com/shkim4u/protecting-data-with-fpe-pseudonymization/pkg/kms"
 	"golang.org/x/crypto/nacl/secretbox"
 )
 
@@ -42,7 +43,7 @@ type KmsPayload struct {
 }
 
 var (
-	kmsClient            = newKmsClient()
+	kmsClient            = NewKmsClient()
 	secretsManagerClient = newSecretsManagerClient()
 
 	// FPE encryption/decryption key bytes as plain in global state.

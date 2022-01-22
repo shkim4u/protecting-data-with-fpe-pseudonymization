@@ -1,4 +1,4 @@
-package handlers
+package kms
 
 import (
 	"fmt"
@@ -16,7 +16,7 @@ type KmsClientImpl struct {
 // KmsFunction is a lambda that operates on the KMS service
 type KmsFunction func(*kms.KMS) error
 
-func newKmsClient() *KmsClientImpl {
+func NewKmsClient() *KmsClientImpl {
 	return &KmsClientImpl{}
 }
 
