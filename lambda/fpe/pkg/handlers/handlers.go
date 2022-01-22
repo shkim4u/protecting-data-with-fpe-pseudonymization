@@ -44,8 +44,8 @@ type KmsPayload struct {
 }
 
 var (
-	kmsClient            = NewKmsClient()
-	secretsManagerClient = NewSecretsManagerClient()
+	kmsClient            = kms.NewKmsClient()
+	secretsManagerClient = secretsmanager.NewSecretsManagerClient()
 
 	// FPE encryption/decryption key bytes as plain in global state.
 	// NOTE: This is only for faster operation, and have to be encrypted form instead if this concerns you.
